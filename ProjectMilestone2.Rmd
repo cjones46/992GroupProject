@@ -125,12 +125,3 @@ graphWrapper = function(yearInput, monthInput) {
 ```{r}
 graphWrapper(2022, 1)
 ```
-
-
-TODO:
-- determine how to filter out locations not over contiguous US
-- write proposal doc
-- write email
-
-
-- bonus; use that same over function to make the faceted plots I was considering
