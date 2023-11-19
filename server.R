@@ -1,14 +1,9 @@
-#
-# This is the server logic of a Shiny web application. You can run the
-# application by clicking 'Run App' above.
-#
-# Find out more about building applications with Shiny here:
-#
-#    http://shiny.rstudio.com/
-#
-
 library(shiny)
-
+library(tidyverse)
+library(lubridate)
+library(rnaturalearth)
+library(maps)
+library(sf)
 
 # Bird locations
 bird_locations = read_csv("bird_locations.csv")

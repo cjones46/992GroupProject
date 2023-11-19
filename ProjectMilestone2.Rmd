@@ -11,14 +11,13 @@ library(lubridate)
 library(rnaturalearth)
 library(maps)
 library(sf)
-library(geojsonio)
-library(sp)
 ```
 
 # Bird Locations
 
 ```{r}
 # Downloaded from: https://www.sciencebase.gov/catalog/item/632b2d7bd34e71c6d67bc161
+# These files are too big to upload to GitHub so you need to go download them yourself, run this chunk once, and then you'll have bird_locations.csv on your local machine.
 
 # Read in raw bird data
 birds = bind_rows(read_csv("NABBP_2022_grp_39.csv") %>% 
