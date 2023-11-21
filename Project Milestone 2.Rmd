@@ -1,0 +1,167 @@
+---
+title: "Milestone 2"
+author: "SM"
+date: "2023-11-19"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(biscale)
+library(cowplot)
+library(fipio)
+library(geojsonio)
+library(lubridate)
+library(maps)
+library(rnaturalearth)
+library(sf)
+library(shiny)
+library(sp)
+library(tidyverse)
+```
+
+```{r}
+# Downloaded from: https://www.sciencebase.gov/catalog/item/632b2d7bd34e71c6d67bc161
+# These files are too big to upload to GitHub so you need to go download them yourself, run this chunk once, and then you'll have bird_locations.csv on your local machine.
+
+# Read in raw bird data
+birds = bind_rows(read_csv("NABBP_2022_grp_39.csv") %>% 
+                    mutate(bird_type = "American Goldfinch"),
+                  read_csv("NABBP_2022_grp_45.csv") %>% 
+                    mutate(bird_type = "Song Sparrow"))
+
+# Latitude range: 50-25N
+# Longitude range: 125-65W
+bird_locations = birds %>% 
+  select(BAND, EVENT_DATE, EVENT_YEAR, EVENT_MONTH, LAT_DD, LON_DD, bird_type) %>% 
+  mutate(
+    EVENT_MONTH = as.numeric(EVENT_MONTH),
+    EVENT_YEAR = as.numeric(EVENT_YEAR)
+  ) %>% 
+  filter(
+    EVENT_YEAR >= 2000,
+    LAT_DD <= 50 & LAT_DD >= 25, 
+    LON_DD >= -125 & LON_DD <= -65
+  )
+
+# In the future, would like to exclude points which are outside the USA - will leave this for Milestone 3, having trouble with spatial features
+
+write_csv(bird_locations, "bird_locations.csv")
+
+bird_locations = read_csv("bird_locations.csv")
+stateTemps = read_csv("allStateTemps.csv")
+```{r}
+
+
+```{r}
+# Load U.S. states boundaries data, create an SF from the bird latitude and longitude, and join the two to map to states
+us_states <- ne_states(country = "United States of America", returnclass = "sf") %>%
+  select(geometry,name) %>%
+  filter(!name %in% c("District of Columbia","Alaska","Hawaii"))
+bird_sf_data <- st_as_sf(bird_locations, coords = c("LON_DD", "LAT_DD"), crs = st_crs(us_states))
+result <- st_join(bird_sf_data, us_states) %>%
+  filter(!is.na(name)) # Remove observations that don't map to the continental U.S. states
+
+# Count of birds by month and year
+subset_data <- result %>%
+  group_by(EVENT_YEAR, EVENT_MONTH, bird_type) %>%
+  summarize(total_bird_count = n()) %>%
+  ungroup() 
+subset_data <- as.data.frame(subset_data) %>%
+  select(EVENT_YEAR,EVENT_MONTH,bird_type,total_bird_count)
+
+# Count of birds by month, year, and state
+subset_data_state <- result %>%
+  group_by(EVENT_YEAR, EVENT_MONTH, bird_type, name) %>%
+  summarize(total_bird_count_state = n()) %>%
+  ungroup()
+subset_data_state <- as.data.frame(subset_data_state) %>%
+  select(EVENT_YEAR,EVENT_MONTH,bird_type,name,total_bird_count_state)
+
+# Merge the two dataframes with some cleaning
+data_joined <- left_join(subset_data_state, subset_data, by = c("EVENT_YEAR","EVENT_MONTH","bird_type")) %>%
+  left_join(., stateTemps, by = c("EVENT_YEAR"= "year", "EVENT_MONTH" = "month_num", "name")) %>% 
+  mutate(pct_count = total_bird_count_state/total_bird_count) %>%
+  filter(!is.na(name) & !is.na(Value)) %>%
+  rename("state" = "name",
+         "year" = "EVENT_YEAR",
+         "month" = "EVENT_MONTH",
+         "Temperature" = "Value") %>%
+  left_join(.,us_states, by = c("state" = "name"))
+
+# Define graphing function filtered to year, month, species
+graph_filtered = function (inYear,inMonth,inSpecies) {
+  data_filtered <- data_joined %>%
+    filter(year == inYear, month == inMonth, bird_type == inSpecies)
+
+  # Add a requirement for the filtered dataset to be non-empty
+  req(nrow(data_filtered) > 0)
+  
+  # Define bivariate scale
+  data <- bi_class(data_filtered, x = Temperature, y = pct_count, style = "equal", dim = 3)
+  
+  map <- ggplot() + 
+    geom_sf(data = data, mapping = aes(fill = bi_class, geometry = geometry), color = "white", size = 0.1, show.legend = FALSE) +
+    geom_sf(data = us_states, color = "black", fill = NA) +
+    bi_scale_fill(pal = "GrPink", dim = 3) +
+    labs(
+      subtitle = paste(inMonth, "/", inYear)
+    ) +
+    bi_theme()
+  
+  legend <- bi_legend(pal = "GrPink",
+                      dim = 3,
+                      xlab = "Temperature",
+                      ylab = "Population Share",
+                      size = 10)
+  
+  finalPlot <- ggdraw() +
+    draw_plot(map, 0, 0, 1, 1) +
+    draw_plot(legend, 0, 0, 0.3, 0.3)
+  
+  return(finalPlot)
+  
+}
+```
+
+```{r, eval=FALSE}
+# Shiny app implementation
+ui <- fluidPage(
+  
+  titlePanel("Bird Migration and Temperatures in the United States"),
+  
+  #Year and month slider, species selection filter
+  sidebarLayout(
+    sidebarPanel(
+      sliderInput("month",
+                  "Month within year:",
+                  min = 1,
+                  max = 12,
+                  value = 1),
+      sliderInput("year",
+                  "Year:",
+                  min = 2000,
+                  max = 2022,
+                  value = 2022, 
+                  sep = ""),
+      selectInput("species_select", label = "Species", choices = unique(data_joined$bird_type), selected = "American Goldfinch")
+    ),
+    
+    
+    
+    mainPanel(
+      plotOutput("bivar_map")
+    )
+  ),
+  
+)
+
+
+server <- function(input, output) {
+  #Bivariate choropleth function output
+  output$bivar_map <- renderPlot(graph_filtered(input$year, input$month, input$species_select))
+  
+}
+
+shinyApp(ui, server)
+```
