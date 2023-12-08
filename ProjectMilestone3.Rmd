@@ -1,0 +1,55 @@
+---
+title: "migrationTrajectories"
+author: "Cameron Jones"
+date: "2023-12-08"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(rnaturalearth)
+library(maps)
+library(sf)
+```
+
+
+```{r}
+bird_locations = read_csv("bird_locations.csv") %>% filter(EVENT_MONTH < 13)
+stateTemps = read_csv("allStateTemps.csv")
+statePolygons = ne_states(country = "united states of america", returnclass = "sf") %>% filter(!(name %in% c("Alaska", "Hawaii", "District of Columbia")))
+```
+
+```{r}
+birdsAvg = bird_locations %>% group_by(bird_type, EVENT_MONTH) %>% summarize(LAT = mean(LAT_DD), LON = mean(LON_DD)) %>% 
+  rename(month_num = EVENT_MONTH)
+
+birds_start = birdsAvg %>% filter(month_num == 1)
+
+stateTempsAvg = stateTemps %>% group_by(name, month_num) %>% summarize(Value = mean(Value))
+g_data = left_join(statePolygons, stateTempsAvg)
+```
+
+```{r}
+ggplot(g_data) + 
+  geom_sf(aes(fill = Value)) +
+  geom_point(data = birds_start,
+             mapping = aes(LON, LAT, color = bird_type),
+             size = 5) +
+  geom_line(data = birdsAvg,
+              mapping = aes(LON, LAT, color = bird_type),
+              size = 2,
+            arrow = arrow(ends = "last")) +
+  
+  scale_color_manual(values = c("gold", "burlywood4")) +
+  scale_fill_viridis_c(option = "inferno", limits = c(0, 100)) +
+  labs(
+    title = "Bird Sightings and Average Temperature",
+    subtitle = "Average across 2000-2022, Month-By-Month Migration",
+    fill = "Avg. Temp (F)",
+    color = "Bird Type"
+  ) +
+  theme_void()
+
+ggsave("avgMigrationTrajectories.jpg")
+```
