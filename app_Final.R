@@ -1,4 +1,4 @@
-library(RColorBrewer)
+# Load necessary libraries
 library(shiny)
 library(shinydashboard)
 library(leaflet)
@@ -22,26 +22,21 @@ library(ggthemes)
 library(rsconnect)
 
 
-# Load necessary libraries
+# Setup for data loading and processing. Begin with 100 rows, but can be generalized and expanded.
 nrows_to_read <- 100
 total_columns <- 23 # there are 23 columns in total in the CSV file
 classes <- rep("NULL", total_columns)
 
-# Set the classes for the columns you want to keep
+# Set the classes for the columns to be kept
 classes[c(1, 2, 5, 6, 7, 8, 9, 11, 12, 20, 21)] <- "character" # Adjust the class as needed
 
-#Read only the first 1000 rows from each CSV file
+#Read only the first 100 rows from each CSV file. Currently-commented URL arguments can be modified to change between files and read directly from ScienceBase.
 goldfinch_data <- read.csv("NABBP_2022_grp_39.csv", nrows = nrows_to_read, colClasses = classes)
 #goldfinch_data <- read.csv("https://www.sciencebase.gov/catalog/file/get/632b2d7bd34e71c6d67bc161?f=__disk__88%2F55%2F45%2F885545059519d0557ea466b8cf88fa86696da3a4", colClasses = classes)
 sparrow_data <- read.csv("NABBP_2022_grp_45.csv", nrows = nrows_to_read, colClasses = classes)
 #sparrow_data <- read.csv("https://www.sciencebase.gov/catalog/file/get/632b2d7bd34e71c6d67bc161?f=__disk__56%2F48%2F68%2F564868b7682640729949bbe349ff71c756c0c329", colClasses = classes)
 
-
-# Or Read and combine the data
-# goldfinch_data <- read.csv("NABBP_2022_grp_39.csv", colClasses = classes)
-# sparrow_data <- read.csv("NABBP_2022_grp_45.csv", colClasses = classes)
-
-# Add speicies column
+# Add species column, combine data
 goldfinch_data$species <- "American Goldfinch"
 sparrow_data$species <- "Song Sparrow"
 dataset <- rbind(goldfinch_data, sparrow_data)
@@ -69,8 +64,6 @@ provinces_canada <- ne_states(country = "canada", returnclass = "sf")
 # Combine US states and Canadian provinces
 states <- rbind(states_us, provinces_canada)
 
-#states <- ne_states(country = "united states of america", returnclass = "sf")
-
 # Transform bird data to an sf object
 bird_locations_sf <- st_as_sf(dataset, coords = c("LON_DD", "LAT_DD"), crs = st_crs(4326))
 
@@ -80,21 +73,11 @@ bird_locations_with_state_or_province <- st_join(bird_locations_sf, states)
 # Add state or province name back to the original dataset
 dataset$State <- bird_locations_with_state_or_province$name
 
-
-
 allStateTemps <- read.csv("https://raw.githubusercontent.com/cjones46/992GroupProject/main/allStateTemps.csv")
 statePolygons = ne_states(country = "united states of america", returnclass = "sf") %>% dplyr::filter(!(name %in% c("Alaska", "Hawaii", "District of Columbia")))
 
-
-
-########################################## SAM'S PROCESSING ####################################
-
-# Read in raw bird data
-# birds = bind_rows(read_csv("https://www.sciencebase.gov/catalog/file/get/632b2d7bd34e71c6d67bc161?f=__disk__88%2F55%2F45%2F885545059519d0557ea466b8cf88fa86696da3a4", nrows = nrows_to_read) %>% 
-#                       mutate(bird_type = "American Goldfinch"),
-#                   read_csv("https://www.sciencebase.gov/catalog/file/get/632b2d7bd34e71c6d67bc161?f=__disk__56%2F48%2F68%2F564868b7682640729949bbe349ff71c756c0c329", nrows = nrows_to_read) %>% 
-#                       mutate(bird_type = "Song Sparrow"))
-
+### Processing for initial tab
+# Read in and prepare data for this tab's purpose
 birds = bind_rows(read_csv("NABBP_2022_grp_39.csv") %>% 
                     mutate(bird_type = "American Goldfinch"),
                   read_csv("NABBP_2022_grp_45.csv") %>% 
@@ -114,14 +97,7 @@ bird_locations = birds %>%
         LON_DD >= -125 & LON_DD <= -65
     )
 
-# In the future, would like to exclude points which are outside the USA - will leave this for Milestone 3, having trouble with spatial features
-
-# write_csv(bird_locations, "bird_locations.csv")
-# 
-# bird_locations = read_csv("bird_locations.csv")
-
 stateTemps = read_csv("https://raw.githubusercontent.com/cjones46/992GroupProject/main/allStateTemps.csv")
-
 
 # Load U.S. states boundaries data, create an SF from the bird latitude and longitude, and join the two to map to states
 us_states <- ne_states(country = "United States of America", returnclass = "sf") %>%
@@ -147,7 +123,7 @@ subset_data_state <- result %>%
 subset_data_state <- as.data.frame(subset_data_state) %>%
     select(EVENT_YEAR,EVENT_MONTH,bird_type,name,total_bird_count_state)
 
-# Merge the two dataframes with some cleaning
+# Merge the two dataframes with some housekeeping
 data_joined <- left_join(subset_data_state, subset_data, by = c("EVENT_YEAR","EVENT_MONTH","bird_type")) %>%
     left_join(., stateTemps, by = c("EVENT_YEAR"= "year", "EVENT_MONTH" = "month_num", "name")) %>% 
     mutate(pct_count = total_bird_count_state/total_bird_count) %>%
@@ -158,41 +134,7 @@ data_joined <- left_join(subset_data_state, subset_data, by = c("EVENT_YEAR","EV
            "Temperature" = "Value") %>%
     left_join(.,us_states, by = c("state" = "name"))
 
-
-# Define graphing function filtered to year, month, species
-graph_filtered = function (inYear,inMonth,inSpecies) {
-    data_filtered <- data_joined %>%
-        filter(year == inYear, month == inMonth, bird_type == inSpecies)
-    
-    # Add a requirement for the filtered dataset to be non-empty
-    req(nrow(data_filtered) > 0)
-    
-    # Define bivariate scale
-    data <- bi_class(data_filtered, x = Temperature, y = pct_count, style = "equal", dim = 3)
-    
-    map <- ggplot() + 
-        geom_sf(data = data, mapping = aes(fill = bi_class, geometry = geometry), color = "white", size = 0.1, show.legend = FALSE) +
-        geom_sf(data = us_states, color = "black", fill = NA) +
-        bi_scale_fill(pal = "GrPink", dim = 3) +
-        labs(
-            subtitle = paste(inMonth, "/", inYear)
-        ) +
-        bi_theme()
-    
-    legend <- bi_legend(pal = "GrPink",
-                        dim = 3,
-                        xlab = "Temperature",
-                        ylab = "Population Share",
-                        size = 10)
-    
-    finalPlot <- ggdraw() +
-        draw_plot(map, 0, 0, 1, 1) +
-        draw_plot(legend, 0, 0, 0.3, 0.3)
-    
-    return(finalPlot)
-    
-}
-
+# Define bar graph function for first tab visualization of historical monthly vs. annual population by state for a given month
 filtered_bar = function (inYear, inMonth, inSpecies, inState) {
     
     month_list = c("January","Februrary","March","April","May","June","July","August","September","October","November","December")
@@ -233,6 +175,7 @@ filtered_bar = function (inYear, inMonth, inSpecies, inState) {
     return(bar_plot)
 }
 
+# Define choropleth mapping function showing current month-year's population for a given species
 population_choropleth = function(inYear, inMonth, inSpecies) {
     data_filtered <- data_joined %>%
         filter(year == inYear, month == inMonth, bird_type == inSpecies)
@@ -383,7 +326,8 @@ server <- function(input, output) {
     
     
     bird_locations$season <- cut(bird_locations$EVENT_MONTH, breaks = c(0, 2, 5, 8, 12), labels = c("Winter", "Spring", "Summer", "Autumn"))
-    
+
+    # Define leaflet to show species population by season for a selected year
     output$map <- renderLeaflet({
         selected_data <- bird_locations %>%
             filter(bird_type == input$species_select, EVENT_YEAR == input$year) %>%
